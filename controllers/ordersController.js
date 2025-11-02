@@ -129,3 +129,150 @@ exports.deleteOrder = (req, res) => {
     });
   });
 };
+
+/*exports.updateOrder = (req, res) => {
+  const orderId = req.params.id;
+  const { customer_name, total, profit, products } = req.body;
+
+  db.beginTransaction((err) => {
+    if (err) return res.status(500).json({ error: "Transaction start failed" });
+
+    // Update main order info
+    db.query(
+      "UPDATE orders SET customer_name = ?, total = ?, profit = ? WHERE id = ?",
+      [customer_name, total, profit, orderId],
+      (err2) => {
+        if (err2) return db.rollback(() => res.status(500).json({ error: err2.message }));
+
+        // Delete old products first
+        db.query("DELETE FROM order_products WHERE order_id = ?", [orderId], (err3) => {
+          if (err3) return db.rollback(() => res.status(500).json({ error: err3.message }));
+
+          // Insert updated products
+          const insertValues = products.map(p => [
+            orderId,
+            p.stock_id,
+            p.name,
+            p.quantity,
+            p.selling_price,
+            p.buying_price
+          ]);
+
+          const insertQuery = `
+            INSERT INTO order_products (order_id, stock_id, name, quantity, selling_price, buying_price)
+            VALUES ?
+          `;
+
+          db.query(insertQuery, [insertValues], (err4) => {
+            if (err4) return db.rollback(() => res.status(500).json({ error: err4.message }));
+
+            db.commit((err5) => {
+              if (err5) return db.rollback(() => res.status(500).json({ error: err5.message }));
+              res.json({ success: true });
+            });
+          });
+        });
+      }
+    );
+  });
+}; */
+
+exports.updateOrder = (req, res) => {
+  const orderId = req.params.id;
+  const { customer_name, total, profit, products } = req.body;
+
+  db.beginTransaction((err) => {
+    if (err) return res.status(500).json({ error: "Transaction start failed" });
+
+    // 1️⃣ Fetch old products to restore their stock
+    db.query("SELECT name, quantity FROM order_products WHERE order_id = ?", [orderId], (err1, oldProducts) => {
+      if (err1) return db.rollback(() => res.status(500).json({ error: err1.message }));
+
+      // 2️⃣ Restore old stock levels
+      const restoreStock = (callback) => {
+        if (!oldProducts.length) return callback();
+
+        let i = 0;
+        function restoreNext() {
+          if (i >= oldProducts.length) return callback();
+          const p = oldProducts[i];
+          db.query(
+            "UPDATE stocks SET stock = stock + ? WHERE name = ?",
+            [p.quantity, p.name],
+            (err2) => {
+              if (err2) return callback(err2);
+              i++;
+              restoreNext();
+            }
+          );
+        }
+        restoreNext();
+      };
+
+      restoreStock((restoreErr) => {
+        if (restoreErr) return db.rollback(() => res.status(500).json({ error: restoreErr.message }));
+
+        // 3️⃣ Delete old products
+        db.query("DELETE FROM order_products WHERE order_id = ?", [orderId], (err3) => {
+          if (err3) return db.rollback(() => res.status(500).json({ error: err3.message }));
+
+          // 4️⃣ Insert updated products
+          const insertValues = products.map((p) => [
+            orderId,
+            p.stock_id,
+            p.name,
+            p.quantity,
+            p.selling_price,
+            p.buying_price,
+          ]);
+
+          const insertQuery = `
+            INSERT INTO order_products (order_id, stock_id, name, quantity, selling_price, buying_price)
+            VALUES ?
+          `;
+
+          db.query(insertQuery, [insertValues], (err4) => {
+            if (err4) return db.rollback(() => res.status(500).json({ error: err4.message }));
+
+            // 5️⃣ Deduct new stock levels
+            let j = 0;
+            function deductNext() {
+              if (j >= products.length) return commitAll();
+              const p = products[j];
+              db.query(
+                "UPDATE stocks SET stock = stock - ? WHERE name = ?",
+                [p.quantity, p.name],
+                (err5) => {
+                  if (err5) return db.rollback(() => res.status(500).json({ error: err5.message }));
+                  j++;
+                  deductNext();
+                }
+              );
+            }
+
+            // 6️⃣ Commit all
+            function commitAll() {
+              db.query(
+                "UPDATE orders SET customer_name = ?, total = ?, profit = ? WHERE id = ?",
+                [customer_name, total, profit, orderId],
+                (err6) => {
+                  if (err6) return db.rollback(() => res.status(500).json({ error: err6.message }));
+
+                  db.commit((err7) => {
+                    if (err7)
+                      return db.rollback(() =>
+                        res.status(500).json({ error: err7.message })
+                      );
+                    res.json({ success: true, message: "Order updated and stocks adjusted" });
+                  });
+                }
+              );
+            }
+
+            deductNext();
+          });
+        });
+      });
+    });
+  });
+};

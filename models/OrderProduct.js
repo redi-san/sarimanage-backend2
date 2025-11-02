@@ -18,7 +18,9 @@ const OrderProduct = {
       }
 
       const product = products[i];
-      db.query("SELECT id, stock FROM stocks WHERE name = ?", [product.name], (err, rows) => {
+      //db.query("SELECT id, stock FROM stocks WHERE name = ?", [product.name], (err, rows) => {
+      db.query("SELECT barcode, stock FROM stocks WHERE name = ?", [product.name], (err, rows) => {
+
         if (err) return callback(err);
 
         if (!rows.length) {
@@ -32,7 +34,9 @@ const OrderProduct = {
         }
 
         
-        product.stock_id = stockRow.id;
+        //product.stock_id = stockRow.id;
+        product.stock_id = stockRow.barcode;
+
 
         // Continue checking next product
         i++;

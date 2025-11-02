@@ -1,11 +1,12 @@
 const express = require("express");
-const { getStocks, getStockById, createStock, updateStock, deleteStock } = require("../controllers/stocksController");
+const upload = require("../middleware/upload");
+const { getStocks, createStock, updateStock, deleteStock } = require("../controllers/stocksController");
+
 const router = express.Router();
 
 router.get("/", getStocks);
-router.get("/:id", getStockById);
-router.post("/", createStock);
-router.put("/:id", updateStock);
+router.post("/", upload.single("image"), createStock); 
+router.put("/:id", upload.single("image"), updateStock);
 router.delete("/:id", deleteStock);
 
 module.exports = router;
